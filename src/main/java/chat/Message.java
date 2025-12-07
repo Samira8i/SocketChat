@@ -7,12 +7,10 @@ import java.util.Date;
 
 public class Message implements Serializable {
     public enum Type {
-        USER_MESSAGE,    // Обычное сообщение
-        JOIN_ROOM,       // Присоединиться к комнате
-        CREATE_ROOM,     // Создать комнату
-        SYSTEM,          // Системное сообщение
-        USER_LIST,       // Список пользователей
-        ROOM_LIST        // Список комнат
+        TEXT,       // обычное сообщение
+        JOIN_ROOM,  // войти в комнату
+        CREATE_ROOM, // создать комнату
+        SYSTEM      // системное сообщение
     }
 
     private Type type;
@@ -21,30 +19,26 @@ public class Message implements Serializable {
     private String room;
     private long timestamp;
 
+    // конструкторы
     public Message(Type type, String username, String content, String room) {
         this.type = type;
         this.username = (username != null) ? username : "Unknown";
         this.content = (content != null) ? content : "";
-        this.room = (room != null) ? room : "🌸 general";
+        this.room = (room != null) ? room : "general";
         this.timestamp = System.currentTimeMillis();
     }
 
+    // для обычного сообщения
     public Message(String username, String content, String room) {
-        this(Type.USER_MESSAGE, username, content, room);
+        this(Type.TEXT, username, content, room);
     }
 
-    public Message(String content) {
-        this(Type.SYSTEM, "🌸 Система", content, "global");
-    }
-
-    public Message(Type type, String username, String room) { //сообщение для команд комнат
+    // для входа/создания комнаты
+    public Message(Type type, String username, String room) {
         this(type, username, "", room);
     }
 
-    public Message(String username, String content) { //сообщение от пользователя
-        this(username, content, "🌸 general");
-    }
-    // Сериализация в байты
+    // сериализация в байты
     public byte[] toBytes() {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         try (DataOutputStream dos = new DataOutputStream(baos)) {
@@ -55,23 +49,16 @@ public class Message implements Serializable {
             dos.writeLong(timestamp);
             return baos.toByteArray();
         } catch (IOException e) {
-            throw new RuntimeException("🌸 Ошибка сериализации сообщения", e);
+            throw new RuntimeException("ошибка сериализации", e);
         }
     }
-    //десериализация
-    public Message(byte[] data) throws IOException {
-        if (data == null || data.length == 0) {
-            throw new IOException("🌸 Пустые данные сообщения");
-        }
 
+    // десериализация из байтов
+    public Message(byte[] data) throws IOException {
         try (ByteArrayInputStream bais = new ByteArrayInputStream(data);
              DataInputStream dis = new DataInputStream(bais)) {
 
             int typeOrdinal = dis.readInt();
-            if (typeOrdinal < 0 || typeOrdinal >= Type.values().length) {
-                throw new IOException("🌸 Некорректный тип сообщения: " + typeOrdinal);
-            }
-
             this.type = Type.values()[typeOrdinal];
             this.username = readString(dis);
             this.content = readString(dis);
@@ -87,24 +74,21 @@ public class Message implements Serializable {
             byte[] bytes = str.getBytes(StandardCharsets.UTF_8);
             dos.writeInt(bytes.length);
             dos.write(bytes);
-        } //записывает длину, потом данные
+        }
     }
-    //todo: если время останется подробно разобраться
+
     private String readString(DataInputStream dis) throws IOException {
         int length = dis.readInt();
         if (length == 0) return "";
-        if (length < 0 || length > 65536) {
-            throw new IOException("🌸 Некорректная длина строки: " + length);
-        }
         byte[] bytes = new byte[length];
         dis.readFully(bytes);
         return new String(bytes, StandardCharsets.UTF_8);
     }
 
+    // геттеры
     public Type getType() { return type; }
     public String getUsername() { return username; }
     public String getContent() { return content; }
-    public String getMessage() { return content; }
     public String getRoom() { return room; }
     public long getTimestamp() { return timestamp; }
 
@@ -113,21 +97,12 @@ public class Message implements Serializable {
         SimpleDateFormat sdf = new SimpleDateFormat("HH:mm:ss");
         String time = sdf.format(new Date(timestamp));
 
-        switch (type) {
-            case SYSTEM:
-                return String.format("🌸 [%s] %s", time, content);
-            case USER_MESSAGE:
-                return String.format("🌸 [%s][%s] %s: %s", room, time, username, content);
-            case JOIN_ROOM:
-                return String.format("🌸 [%s] %s присоединился к комнате %s", time, username, room);
-            case CREATE_ROOM:
-                return String.format("🌸 [%s] %s создал комнату %s", time, username, room);
-            default:
-                return String.format("🌸 [%s] %s: %s", time, username, content);
+        if (type == Type.TEXT) {
+            return String.format("[%s][%s] %s: %s", room, time, username, content);
+        } else if (type == Type.JOIN_ROOM) {
+            return String.format("[%s] %s вошел в комнату %s", time, username, room);
+        } else {
+            return String.format("[%s] %s создал комнату %s", time, username, room);
         }
-    }
-
-    public static Message createSystemMessage(String content) {
-        return new Message("🌸 " + content);
     }
 }
