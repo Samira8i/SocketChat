@@ -2,8 +2,6 @@ package chat;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
-import java.text.SimpleDateFormat;
-import java.util.Date;
 
 public class Message implements Serializable {
     public enum Type {
@@ -17,7 +15,6 @@ public class Message implements Serializable {
     private String username;
     private String content;
     private String room;
-    private long timestamp;
 
     // конструкторы
     public Message(Type type, String username, String content, String room) {
@@ -25,7 +22,6 @@ public class Message implements Serializable {
         this.username = (username != null) ? username : "Unknown";
         this.content = (content != null) ? content : "";
         this.room = (room != null) ? room : "general";
-        this.timestamp = System.currentTimeMillis();
     }
 
     // для обычного сообщения
@@ -46,7 +42,6 @@ public class Message implements Serializable {
             writeString(dos, username);
             writeString(dos, content);
             writeString(dos, room);
-            dos.writeLong(timestamp);
             return baos.toByteArray();
         } catch (IOException e) {
             throw new RuntimeException("ошибка сериализации", e);
@@ -63,7 +58,6 @@ public class Message implements Serializable {
             this.username = readString(dis);
             this.content = readString(dis);
             this.room = readString(dis);
-            this.timestamp = dis.readLong();
         }
     }
 
@@ -85,24 +79,19 @@ public class Message implements Serializable {
         return new String(bytes, StandardCharsets.UTF_8);
     }
 
-    // геттеры
     public Type getType() { return type; }
     public String getUsername() { return username; }
     public String getContent() { return content; }
     public String getRoom() { return room; }
-    public long getTimestamp() { return timestamp; }
 
     @Override
     public String toString() {
-        SimpleDateFormat sdf = new SimpleDateFormat("HH:mm:ss");
-        String time = sdf.format(new Date(timestamp));
-
         if (type == Type.TEXT) {
-            return String.format("[%s][%s] %s: %s", room, time, username, content);
+            return String.format("[%s] %s: %s", room, username, content);
         } else if (type == Type.JOIN_ROOM) {
-            return String.format("[%s] %s вошел в комнату %s", time, username, room);
+            return String.format("%s вошел в комнату %s", username, room);
         } else {
-            return String.format("[%s] %s создал комнату %s", time, username, room);
+            return String.format("%s создал комнату %s", username, room);
         }
     }
 }

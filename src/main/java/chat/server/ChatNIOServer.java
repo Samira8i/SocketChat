@@ -1,309 +1,325 @@
 package chat.server;
 
 import chat.Message;
-
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.nio.ByteBuffer;
 import java.nio.channels.*;
 import java.util.*;
-import java.util.function.Consumer;
 
 public class ChatNIOServer {
-    private volatile boolean running = false; // флаг работы сервера
-    private Selector selector;
-    private ServerSocketChannel serverChannel; //серверный канал
-    private Consumer<String> logListener = System.out::println;
+    private volatile boolean running = false;
+    private Selector selector; // следит за всеми соединениями
+    private ServerSocketChannel serverChannel; // главный канал для приема подключений
 
-    // комнаты: имя - список каналов
+    // комнаты: имя комнаты - список кто в ней сидит
     private final Map<String, Set<SocketChannel>> rooms = new HashMap<>();
-    // пользователи: канал - имя
+    // пользователи: канал связи - имя пользователя
     private final Map<SocketChannel, String> users = new HashMap<>();
-    // текущая комната пользователя
+    // текущая комната пользователя: канал - имя комнаты
     private final Map<SocketChannel, String> currentRooms = new HashMap<>();
-    //реализую слушатель который позволяет более гибко работать с логами и можно настроить на консоль допустим
-    public void setLogListener(Consumer<String> listener) {
-        this.logListener = (listener != null) ? listener : System.out::println;
-    }
 
+    // подготавливаем сервер к работе
     public void start(int port) throws IOException {
         if (running) {
             throw new IllegalStateException("сервер уже запущен");
         }
 
-        selector = Selector.open(); //создаем селектор
-        serverChannel = ServerSocketChannel.open(); //создаем канал
-        serverChannel.configureBlocking(false); //установка неблокирующего режима
-        serverChannel.socket().setReuseAddress(true); //на всякий
-        serverChannel.bind(new InetSocketAddress(port));
-        serverChannel.register(selector, SelectionKey.OP_ACCEPT); //регистрируем селектор на событие accept
-
+        selector = Selector.open(); // создаю наблюдателя
+        serverChannel = ServerSocketChannel.open();
+        serverChannel.configureBlocking(false); // делаю неблокирующей
+        serverChannel.bind(new InetSocketAddress(port)); // привязываю к порту
+        serverChannel.register(selector, SelectionKey.OP_ACCEPT);
         running = true;
-        new Thread(this::runServer, "server-thread").start();
-
-        log("сервер запущен на порту " + port);
+        System.out.println("Сервер запущен на порту " + port);
     }
 
-    private void runServer() {
-        log("поток сервера запущен");
+    // главный цикл работы сервера
+    public void runServer() {
+        System.out.println("Сервер начал работу");
 
-        while (running) {
+        while (running) { // пока флажок "работаю" поднят
             try {
-                int ready = selector.select(100);
+                int ready = selector.select(100); // проверяю: есть ли новые события? жду 100мс
                 if (ready == 0) continue;
 
-                Set<SelectionKey> keys = selector.selectedKeys();
+                Set<SelectionKey> keys = selector.selectedKeys(); // получаю список событий
                 Iterator<SelectionKey> it = keys.iterator();
 
                 while (it.hasNext()) {
                     SelectionKey key = it.next();
-                    it.remove(); //удаление обработанных ключей
+                    it.remove(); // убираю обработанное событие
 
-                    if (!key.isValid()) continue;
+                    if (!key.isValid()) continue; // если ключ неактивен - пропускаю
 
                     try {
                         if (key.isAcceptable()) {
-                            handleAccept(key);
+                            handleAccept(key); // пришел новый гость
                         } else if (key.isReadable()) {
-                            handleRead(key);
+                            handleRead(key); // кто-то прислал сообщение
                         }
                     } catch (IOException e) {
-                        log("ошибка: " + e.getMessage());
-                        closeClient(key);
+                        System.out.println("ошибка: " + e.getMessage());
+                        closeClient(key); // закрываю проблемное соединение
                     }
                 }
             } catch (IOException e) {
-                log("ошибка селектора: " + e.getMessage());
+                System.out.println("ошибка селектора: " + e.getMessage());
             }
         }
 
-        log("сервер остановлен");
+        System.out.println("Сервер остановлен");
     }
-    //Обработка входящих соединений
+
+    // обработка нового подключения
     private void handleAccept(SelectionKey key) throws IOException {
-        ServerSocketChannel serverChannel = (ServerSocketChannel) key.channel(); //возвращаю канал связанный с ключом
-        SocketChannel clientChannel = serverChannel.accept();
+        ServerSocketChannel serverChannel = (ServerSocketChannel) key.channel(); // беру главный канал
+        SocketChannel clientChannel = serverChannel.accept(); // принимаю нового клиента
 
-        if (clientChannel == null) return;
+        if (clientChannel == null) return; // если никто не пришел - выхожу
 
-        clientChannel.configureBlocking(false); //клиентский канал в неблокирующий режим
-        clientChannel.register(selector, SelectionKey.OP_READ); //регистрирует на чтение данных
-
-        log("новое подключение: " + clientChannel.getRemoteAddress());
+        clientChannel.configureBlocking(false); // делаю клиентский канал неблокирующим
+        clientChannel.register(selector, SelectionKey.OP_READ);
+        System.out.println("новое подключение: " + clientChannel.getRemoteAddress());
     }
 
+    // чтение сообщения от клиента
     private void handleRead(SelectionKey key) throws IOException {
-        SocketChannel channel = (SocketChannel) key.channel();
-        ByteBuffer buffer = ByteBuffer.allocate(4096);
+        SocketChannel channel = (SocketChannel) key.channel(); // беру канал клиента
+        ByteBuffer buffer = ByteBuffer.allocate(4096); // готовлю коробку для данных
 
-        int bytesRead = channel.read(buffer);
-        if (bytesRead == -1) { //если разрыв
+        int bytesRead = channel.read(buffer); // читаю что прислал клиент
+        if (bytesRead == -1) { // если -1, значит клиент отключился
             String username = users.get(channel);
             if (username != null) {
-                log(username + " отключился");
-                leaveRoom(channel, username);
+                System.out.println(username + " отключился");
+                leaveRoom(channel, username); // удаляю из комнаты
             }
-            closeClient(key);
+            closeClient(key); // закрываю соединение
             return;
         }
 
-        if (bytesRead > 0) {
-            buffer.flip(); //переключение на чтение
-            processMessage(channel, buffer);
+        if (bytesRead > 0) { // если что-то прочитала
+            buffer.flip(); // переворачиваю буфер для чтения
+            processMessage(channel, buffer); // обрабатываю сообщение
         }
     }
 
+    // разбор полученного сообщения
     private void processMessage(SocketChannel channel, ByteBuffer buffer) {
         try {
-            // читаем длину сообщения
-            if (buffer.remaining() < 4) return;
-            int length = buffer.getInt();
+            // сначала читаю длину сообщения (4 байта)
+            if (buffer.remaining() < 4) return; // если данных мало - жду еще
+            int length = buffer.getInt(); // читаю сколько байт в сообщении
 
-            if (length <= 0 || length > 65536) {
-                log("некорректная длина сообщения");
+            if (length <= 0 || length > 65536) { // проверяю чтобы длина была нормальная
+                System.out.println("некорректная длина сообщения");
                 return;
             }
 
-            // читаем само сообщение
-            if (buffer.remaining() < length) return;
-            byte[] data = new byte[length];
-            buffer.get(data);
+            // проверяю, все ли данные пришли
+            if (buffer.remaining() < length) return; // если не все - жду следующую порцию
 
-            Message message = new Message(data);
-            handleMessage(channel, message);
+            byte[] data = new byte[length]; // создаю массив под сообщение
+            buffer.get(data); // копирую данные
+
+            Message message = new Message(data); // создаю объект сообщения
+            handleMessage(channel, message); // обрабатываю по типу
 
         } catch (Exception e) {
-            log("ошибка обработки сообщения: " + e.getMessage());
+            System.out.println("ошибка обработки сообщения: " + e.getMessage());
         }
     }
 
+    // обработка сообщения по типу
     private void handleMessage(SocketChannel channel, Message message) throws IOException {
-        String username = users.get(channel);
+        String username = users.get(channel); // смотрю, есть ли такой пользователь
 
-        // регистрация пользователя
+        // если пользователь еще не зарегистрирован
         if (username == null) {
-            username = message.getUsername();
+            username = message.getUsername(); // беру имя из сообщения
             if (username == null || username.trim().isEmpty()) {
-                sendMessage(channel, new Message("система", "введите имя", ""));
+                sendMessage(channel, new Message("система", "Введите имя", "")); // прошу ввести имя
                 return;
             }
 
-            // проверка уникальности
+            // проверяю, не занято ли имя
             if (users.containsValue(username)) {
-                sendMessage(channel, new Message("система", "имя занято", ""));
+                sendMessage(channel, new Message("система", "Имя занято", ""));
                 return;
             }
 
+            // регистрирую нового пользователя
             users.put(channel, username);
-            log(username + " зарегистрировался");
-
-            // приветствие
-            sendMessage(channel, new Message("система", "добро пожаловать, " + username, ""));
+            System.out.println(username + " зарегистрировался");
+            sendMessage(channel, new Message("система", "Добро пожаловать, " + username, ""));
             return;
         }
 
-        // обработка по типу
+        // если уже зарегистрирован - смотрю тип сообщения
         switch (message.getType()) {
             case TEXT:
-                handleTextMessage(channel, username, message);
+                handleTextMessage(channel, username, message); // обычное сообщение в чат
                 break;
-
             case JOIN_ROOM:
-                joinRoom(channel, username, message.getRoom());
+                joinRoom(channel, username, message.getRoom()); // вход в комнату
                 break;
-
             case CREATE_ROOM:
-                createRoom(channel, username, message.getRoom());
+                createRoom(channel, username, message.getRoom()); // создание комнаты
                 break;
         }
     }
 
+    // обработка текстового сообщения
     private void handleTextMessage(SocketChannel channel, String username, Message message) {
-        String room = currentRooms.get(channel);
-        if (room == null) {
-            sendMessage(channel, new Message("система", "сначала войдите в комнату", ""));
+        String room = currentRooms.get(channel); // в какой комнате находится пользователь
+        if (room == null) { // если ни в какой
+            sendMessage(channel, new Message("система", "Сначала войдите в комнату", ""));
             return;
         }
 
-        String text = message.getContent();
-        if (text.trim().isEmpty()) return;
+        String text = message.getContent(); // текст сообщения
+        if (text.trim().isEmpty()) return; // если пустое - игнорирую
 
-        // рассылка по комнате
+        // рассылаю сообщение всем в комнате
         broadcastToRoom(room, new Message(username, text, room), channel);
-        log("[" + room + "] " + username + ": " + text);
+        System.out.println("[" + room + "] " + username + ": " + text);
     }
 
+    // присоединение к комнате
     private void joinRoom(SocketChannel channel, String username, String roomName) {
-        if (roomName == null || roomName.trim().isEmpty()) return;
+        if (roomName == null || roomName.trim().isEmpty()) {
+            sendMessage(channel, new Message("система", "Введите имя комнаты", ""));
+            return;
+        }
 
-        // выходим из старой комнаты
+        // проверяю, существует ли такая комната
+        if (!rooms.containsKey(roomName)) {
+            sendMessage(channel, new Message("система", "Комната '" + roomName + "' не существует", ""));
+            return;
+        }
+
+        // если пользователь уже в какой-то комнате - выхожу из нее
         String oldRoom = currentRooms.get(channel);
         if (oldRoom != null) {
             leaveRoom(channel, username, oldRoom);
         }
 
-        // входим в новую
-        rooms.computeIfAbsent(roomName, k -> new HashSet<>()).add(channel); // удобный метод Map: если ключа нет, создает значение
+        // добавляю пользователя в комнату
+        rooms.get(roomName).add(channel);
         currentRooms.put(channel, roomName);
 
-        // уведомляем
+        // уведомляю пользователя и всех в комнате
         sendMessage(channel, new Message(Message.Type.JOIN_ROOM, username, roomName));
         broadcastToRoom(roomName, new Message(Message.Type.SYSTEM, "система", username + " присоединился", roomName), channel);
 
-        log(username + " вошел в комнату " + roomName);
+        System.out.println(username + " вошел в комнату " + roomName);
     }
 
+    // создание новой комнаты
     private void createRoom(SocketChannel channel, String username, String roomName) {
-        if (roomName == null || roomName.trim().isEmpty()) return;
-
-        if (rooms.containsKey(roomName)) {
-            // комната уже есть, просто входим
-            joinRoom(channel, username, roomName);
+        if (roomName == null || roomName.trim().isEmpty()) {
+            sendMessage(channel, new Message("система", "Введите имя комнаты", ""));
             return;
         }
 
-        // создаем новую комнату
-        rooms.put(roomName, new HashSet<>());
-        log("создана комната: " + roomName);
+        // проверяю, нет ли уже такой комнаты
+        if (rooms.containsKey(roomName)) {
+            sendMessage(channel, new Message("система", "Комната '" + roomName + "' уже существует", ""));
+            return;
+        }
 
-        // и входим в нее
+        // создаю новую комнату
+        rooms.put(roomName, new HashSet<>());
+        System.out.println("Создана комната: " + roomName);
+
+        // автоматически вхожу в созданную комнату
         joinRoom(channel, username, roomName);
     }
 
+    // выход из комнаты
     private void leaveRoom(SocketChannel channel, String username, String roomName) {
-        Set<SocketChannel> roomClients = rooms.get(roomName);
+        Set<SocketChannel> roomClients = rooms.get(roomName); // кто в комнате
         if (roomClients != null) {
-            roomClients.remove(channel);
+            roomClients.remove(channel); // убираю пользователя
+            // если комната пустая - удаляю ее
             if (roomClients.isEmpty()) {
                 rooms.remove(roomName);
-                log("комната " + roomName + " удалена (пустая)");
+                System.out.println("Комната " + roomName + " удалена (пустая)");
             }
         }
 
+        // уведомляю всех о выходе
         broadcastToRoom(roomName, new Message(Message.Type.SYSTEM, "система", username + " отсоединился", roomName), null);
     }
 
+    // полный выход пользователя
     private void leaveRoom(SocketChannel channel, String username) {
-        String room = currentRooms.get(channel);
+        String room = currentRooms.get(channel); // в какой комнате был
         if (room != null) {
-            leaveRoom(channel, username, room);
+            leaveRoom(channel, username, room); // выхожу из комнаты
         }
-        currentRooms.remove(channel);
-        users.remove(channel);
+        currentRooms.remove(channel); // убираю из текущих комнат
+        users.remove(channel); // убираю из пользователей
     }
 
+    // рассылка сообщения всем в комнате
     private void broadcastToRoom(String roomName, Message message, SocketChannel exclude) {
-        Set<SocketChannel> roomClients = rooms.get(roomName);
-        if (roomClients == null) return;
+        Set<SocketChannel> roomClients = rooms.get(roomName); // кто в комнате
+        if (roomClients == null) return; // если комнаты нет - выхожу
 
         for (SocketChannel client : roomClients) {
-            if (client != exclude && client.isOpen()) {
-                sendMessage(client, message);
+            if (client != exclude && client.isOpen()) { // всем кроме исключения и если канал открыт
+                sendMessage(client, message); // отправляю сообщение
             }
         }
     }
 
+    // отправка сообщения одному клиенту
     private void sendMessage(SocketChannel channel, Message message) {
-        if (!channel.isOpen()) return;
+        if (!channel.isOpen()) return; // если канал закрыт - ничего не делаю
 
         try {
-            byte[] data = message.toBytes();
-            ByteBuffer buffer = ByteBuffer.allocate(4 + data.length);
-            buffer.putInt(data.length);
-            buffer.put(data);
-            buffer.flip();
+            byte[] data = message.toBytes(); // превращаю сообщение в байты
+            ByteBuffer buffer = ByteBuffer.allocate(4 + data.length); // готовлю буфер
+            buffer.putInt(data.length); // сначала пишу длину
+            buffer.put(data); // потом само сообщение
+            buffer.flip(); // готовлю к отправке
 
+            // отправляю пакетиками, пока все не отправлю
             while (buffer.hasRemaining()) {
                 channel.write(buffer);
             }
         } catch (IOException e) {
-            log("ошибка отправки: " + e.getMessage());
+            System.out.println("Ошибка отправки: " + e.getMessage());
         }
     }
 
+    // закрытие соединения с клиентом
     private void closeClient(SelectionKey key) {
         try {
-            SocketChannel channel = (SocketChannel) key.channel();
-            String username = users.get(channel);
+            SocketChannel channel = (SocketChannel) key.channel(); // беру канал
+            String username = users.get(channel); // имя пользователя
 
             if (username != null) {
-                leaveRoom(channel, username);
+                leaveRoom(channel, username); // вывожу из комнаты
             }
 
-            key.cancel();
-            channel.close();
+            key.cancel(); // отменяю ключ
+            channel.close(); // закрываю канал
         } catch (IOException e) {
-            // игнорируем
+            // ничего не делаю при ошибке закрытия
         }
     }
 
+    // остановка всего сервера
     public void stop() {
-        if (!running) return;
+        if (!running) return; // если уже не работает - выхожу
 
-        log("остановка сервера...");
-        running = false;
+        System.out.println("Остановка сервера...");
+        running = false; // опускаю флажок "работаю"
 
-        // закрываем все соединения
+        // закрываю все соединения
         for (SelectionKey key : selector.keys()) {
             if (key.isValid()) {
                 closeClient(key);
@@ -312,24 +328,20 @@ public class ChatNIOServer {
 
         try {
             if (selector != null && selector.isOpen()) {
-                selector.close();
+                selector.close(); // закрываю наблюдателя
             }
             if (serverChannel != null && serverChannel.isOpen()) {
-                serverChannel.close();
+                serverChannel.close(); // закрываю главную дверь
             }
         } catch (IOException e) {
-            log("ошибка закрытия: " + e.getMessage());
+            System.out.println("Ошибка закрытия: " + e.getMessage());
         }
 
+        // очищаю все списки
         rooms.clear();
         users.clear();
         currentRooms.clear();
 
-        log("сервер остановлен");
-    }
-
-    private void log(String message) {
-        String timestamp = new java.text.SimpleDateFormat("HH:mm:ss").format(new java.util.Date());
-        logListener.accept("[" + timestamp + "] " + message);
+        System.out.println("Сервер остановлен");
     }
 }

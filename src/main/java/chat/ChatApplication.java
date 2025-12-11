@@ -5,12 +5,13 @@ import java.awt.*;
 
 public class ChatApplication {
     public static void main(String[] args) {
+        //строчки для установки привычного мак стиля у свинга
         try {
             UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
         } catch (Exception e) {
             e.printStackTrace();
         }
-
+        //специальный метод чтобы гуи работал асинхронно , через лямбду пишу
         SwingUtilities.invokeLater(() -> {
             Color pinkLight = new Color(255, 240, 245);
             Color pinkMedium = new Color(255, 182, 193);
