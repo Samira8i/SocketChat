@@ -2,9 +2,6 @@ package chat.server;
 
 import javax.swing.*;
 import java.awt.*;
-import java.io.IOException;
-import java.io.OutputStream;
-import java.io.PrintStream;
 
 public class ChatNIOServerGUI {
     private ChatNIOServer server;
@@ -89,15 +86,50 @@ public class ChatNIOServerGUI {
 
             server = new ChatNIOServer();
 
-            // Перенаправляем вывод System.out в лог (наверное хардкод)
-            redirectSystemOut();
+            // устанавливаем слушателя событий сервера - чтобы получать логи
+            server.setServerListener(new ChatNIOServer.ServerListener() {
+                @Override
+                public void onLogMessage(String message) {
+                    appendLog(message); // когда сервер пишет лог - добавляем в GUI
+                }
+
+                @Override
+                public void onUserRegistered(String username) {
+                    appendLog("👤 " + username + " зарегистрировался");
+                }
+
+                @Override
+                public void onUserDisconnected(String username) {
+                    appendLog("👤 " + username + " отключился");
+                }
+
+                @Override
+                public void onRoomCreated(String roomName) {
+                    appendLog("🏠 Создана комната: " + roomName);
+                }
+
+                @Override
+                public void onUserJoinedRoom(String username, String roomName) {
+                    appendLog("👤 " + username + " вошел в комнату " + roomName);
+                }
+
+                @Override
+                public void onUserLeftRoom(String username, String roomName) {
+                    appendLog("👤 " + username + " вышел из комнаты " + roomName);
+                }
+
+                @Override
+                public void onChatMessage(String username, String roomName, String message) {
+                    appendLog("💬 [" + roomName + "] " + username + ": " + message);
+                }
+            });
 
             new Thread(() -> {
                 try {
                     server.start(port);
                     server.runServer();
-                } catch (IOException e) {
-                    appendLog("Ошибка запуска сервера: " + e.getMessage());
+                } catch (Exception e) {
+                    appendLog("❌ Ошибка запуска сервера: " + e.getMessage());
                     SwingUtilities.invokeLater(() -> {
                         startButton.setEnabled(true);
                         stopButton.setEnabled(false);
@@ -117,25 +149,6 @@ public class ChatNIOServerGUI {
         }
     }
 
-    private void redirectSystemOut() {
-        // Создаем поток вывода, который пишет в лог GUI
-        PrintStream guiPrintStream = new PrintStream(new OutputStream() {
-            @Override
-            public void write(int b) throws IOException {
-            }
-
-            @Override
-            public void write(byte[] b, int off, int len) throws IOException {
-                String text = new String(b, off, len);
-                appendLog(text);
-            }
-        });
-
-        // Перенаправляем System.out
-        System.setOut(guiPrintStream);
-        System.setErr(guiPrintStream);
-    }
-
     private void stopServer() {
         if (server == null) return;
 
@@ -146,7 +159,7 @@ public class ChatNIOServerGUI {
 
         if (confirm != JOptionPane.YES_OPTION) return;
 
-        appendLog("Остановка сервера...");
+        appendLog("🛑 Остановка сервера...");
         server.stop();
 
         startButton.setEnabled(true);
@@ -159,7 +172,6 @@ public class ChatNIOServerGUI {
     private void appendLog(String message) {
         SwingUtilities.invokeLater(() -> {
             logArea.append(message + "\n");
-
             // Автопрокрутка к новому сообщению
             logArea.setCaretPosition(logArea.getDocument().getLength());
         });
