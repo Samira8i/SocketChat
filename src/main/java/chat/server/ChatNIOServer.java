@@ -19,30 +19,24 @@ public class ChatNIOServer {
     // текущая комната пользователя: канал - имя комнаты
     private final Map<SocketChannel, String> currentRooms = new HashMap<>();
 
-    // слушатель событий сервера - кто будет получать уведомления
+    // слушатель для логирования - теперь только один метод для всех событий
     private ServerListener listener;
 
     public interface ServerListener {
-        void onLogMessage(String message); // когда нужно записать лог
-        void onUserRegistered(String username); // когда пользователь зарегистрировался
-        void onUserDisconnected(String username); // когда пользователь отключился
-        void onRoomCreated(String roomName); // когда создана комната
-        void onUserJoinedRoom(String username, String roomName); // когда пользователь вошел в комнату
-        void onUserLeftRoom(String username, String roomName); // когда пользователь вышел из комнаты
-        void onChatMessage(String username, String roomName, String message); // когда отправлено сообщение в чат
+        void onLogMessage(String message);
     }
 
-    // устанавливаем слушателя - кто будет получать события сервера
+    // устанавливаем слушателя
     public void setServerListener(ServerListener listener) {
         this.listener = listener;
     }
 
-    // внутренний метод для логирования - использует слушатель если есть, иначе System.out
+    // метод для логирования - используем везде вместо System.out
     private void log(String message) {
         if (listener != null) {
-            listener.onLogMessage(message); // сообщаю слушателю
+            listener.onLogMessage(message);
         } else {
-            System.out.println(message); // если слушателя нет - пишу в консоль
+            System.out.println(message);
         }
     }
 
@@ -58,7 +52,7 @@ public class ChatNIOServer {
         serverChannel.bind(new InetSocketAddress(port)); // привязываю к порту
         serverChannel.register(selector, SelectionKey.OP_ACCEPT);
         running = true;
-        log("Сервер запущен на порту " + port); // использую наш метод log
+        log("Сервер запущен на порту " + port);
     }
 
     // главный цикл работы сервера
@@ -86,12 +80,12 @@ public class ChatNIOServer {
                             handleRead(key); // кто-то прислал сообщение
                         }
                     } catch (IOException e) {
-                        log("ошибка: " + e.getMessage());
+                        log("Ошибка обработки соединения: " + e.getMessage());
                         closeClient(key); // закрываю проблемное соединение
                     }
                 }
             } catch (IOException e) {
-                log("ошибка селектора: " + e.getMessage());
+                log("Ошибка селектора: " + e.getMessage());
             }
         }
 
@@ -107,7 +101,7 @@ public class ChatNIOServer {
 
         clientChannel.configureBlocking(false); // делаю клиентский канал неблокирующим
         clientChannel.register(selector, SelectionKey.OP_READ);
-        log("новое подключение: " + clientChannel.getRemoteAddress());
+        log("Новое подключение от " + clientChannel.getRemoteAddress());
     }
 
     // чтение сообщения от клиента
@@ -120,9 +114,6 @@ public class ChatNIOServer {
             String username = users.get(channel);
             if (username != null) {
                 log(username + " отключился");
-                if (listener != null) {
-                    listener.onUserDisconnected(username); // сообщаю слушателю об отключении
-                }
                 leaveRoom(channel, username); // удаляю из комнаты
             }
             closeClient(key); // закрываю соединение
@@ -143,7 +134,7 @@ public class ChatNIOServer {
             int length = buffer.getInt(); // читаю сколько байт в сообщении
 
             if (length <= 0 || length > 65536) { // проверяю чтобы длина была нормальная
-                log("некорректная длина сообщения");
+                log("Некорректная длина сообщения");
                 return;
             }
 
@@ -157,7 +148,7 @@ public class ChatNIOServer {
             handleMessage(channel, message); // обрабатываю по типу
 
         } catch (Exception e) {
-            log("ошибка обработки сообщения: " + e.getMessage());
+            log("Ошибка обработки сообщения: " + e.getMessage());
         }
     }
 
@@ -182,9 +173,6 @@ public class ChatNIOServer {
             // регистрирую нового пользователя
             users.put(channel, username);
             log(username + " зарегистрировался");
-            if (listener != null) {
-                listener.onUserRegistered(username); // сообщаю слушателю о регистрации
-            }
             sendMessage(channel, new Message("система", "Добро пожаловать, " + username, ""));
             return;
         }
@@ -217,10 +205,6 @@ public class ChatNIOServer {
         // рассылаю сообщение всем в комнате
         broadcastToRoom(room, new Message(username, text, room), channel);
         log("[" + room + "] " + username + ": " + text);
-
-        if (listener != null) {
-            listener.onChatMessage(username, room, text); // сообщаю слушателю о сообщении в чате
-        }
     }
 
     // присоединение к комнате
@@ -251,10 +235,6 @@ public class ChatNIOServer {
         broadcastToRoom(roomName, new Message(Message.Type.SYSTEM, "система", username + " присоединился", roomName), channel);
 
         log(username + " вошел в комнату " + roomName);
-
-        if (listener != null) {
-            listener.onUserJoinedRoom(username, roomName); // сообщаю слушателю о входе в комнату
-        }
     }
 
     // создание новой комнаты
@@ -273,10 +253,6 @@ public class ChatNIOServer {
         // создаю новую комнату
         rooms.put(roomName, new HashSet<>());
         log("Создана комната: " + roomName);
-
-        if (listener != null) {
-            listener.onRoomCreated(roomName); // сообщаю слушателю о создании комнаты
-        }
 
         // автоматически вхожу в созданную комнату
         joinRoom(channel, username, roomName);
@@ -297,9 +273,7 @@ public class ChatNIOServer {
         // уведомляю всех о выходе
         broadcastToRoom(roomName, new Message(Message.Type.SYSTEM, "система", username + " отсоединился", roomName), null);
 
-        if (listener != null) {
-            listener.onUserLeftRoom(username, roomName); // сообщаю слушателю о выходе из комнаты
-        }
+        log(username + " вышел из комнаты " + roomName);
     }
 
     // полный выход пользователя
@@ -340,7 +314,7 @@ public class ChatNIOServer {
                 channel.write(buffer);
             }
         } catch (IOException e) {
-            log("Ошибка отправки: " + e.getMessage());
+            log("Ошибка отправки сообщения: " + e.getMessage());
         }
     }
 
@@ -365,7 +339,7 @@ public class ChatNIOServer {
     public void stop() {
         if (!running) return; // если уже не работает - выхожу
 
-        log("Остановка сервера...");
+        log("🛑 Остановка сервера...");
         running = false; // опускаю флажок "работаю"
 
         // закрываю все соединения
@@ -383,7 +357,7 @@ public class ChatNIOServer {
                 serverChannel.close(); // закрываю главную дверь
             }
         } catch (IOException e) {
-            log("Ошибка закрытия: " + e.getMessage());
+            log("❌ Ошибка закрытия: " + e.getMessage());
         }
 
         // очищаю все списки

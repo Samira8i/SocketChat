@@ -86,50 +86,21 @@ public class ChatNIOServerGUI {
 
             server = new ChatNIOServer();
 
-            // устанавливаем слушателя событий сервера - чтобы получать логи
+            // устанавливаем слушателя
             server.setServerListener(new ChatNIOServer.ServerListener() {
                 @Override
                 public void onLogMessage(String message) {
-                    appendLog(message); // когда сервер пишет лог - добавляем в GUI
-                }
-
-                @Override
-                public void onUserRegistered(String username) {
-                    appendLog("👤 " + username + " зарегистрировался");
-                }
-
-                @Override
-                public void onUserDisconnected(String username) {
-                    appendLog("👤 " + username + " отключился");
-                }
-
-                @Override
-                public void onRoomCreated(String roomName) {
-                    appendLog("🏠 Создана комната: " + roomName);
-                }
-
-                @Override
-                public void onUserJoinedRoom(String username, String roomName) {
-                    appendLog("👤 " + username + " вошел в комнату " + roomName);
-                }
-
-                @Override
-                public void onUserLeftRoom(String username, String roomName) {
-                    appendLog("👤 " + username + " вышел из комнаты " + roomName);
-                }
-
-                @Override
-                public void onChatMessage(String username, String roomName, String message) {
-                    appendLog("💬 [" + roomName + "] " + username + ": " + message);
+                    appendLog(message); // все логи приходят сюда
                 }
             });
 
+            // запускаем сервер в отдельном потоке
             new Thread(() -> {
                 try {
                     server.start(port);
                     server.runServer();
                 } catch (Exception e) {
-                    appendLog("❌ Ошибка запуска сервера: " + e.getMessage());
+                    appendLog("Ошибка запуска сервера: " + e.getMessage());
                     SwingUtilities.invokeLater(() -> {
                         startButton.setEnabled(true);
                         stopButton.setEnabled(false);
@@ -158,8 +129,6 @@ public class ChatNIOServerGUI {
                 JOptionPane.YES_NO_OPTION);
 
         if (confirm != JOptionPane.YES_OPTION) return;
-
-        appendLog("🛑 Остановка сервера...");
         server.stop();
 
         startButton.setEnabled(true);
